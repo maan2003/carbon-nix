@@ -41,26 +41,32 @@
           ];
           nixSupport.cc-ldflags = [ "-L${llvm.libunwind}/lib" ];
         });
+        fhs = pkgs.buildFHSUserEnv {
+          name = "carbon-dev";
+          targetPkgs = pkgs:
+            with pkgs; [
+              clangUseLLVM
+              llvm.lld
+              llvm.llvm
+              llvm.libcxx
+              llvm.libcxxabi
+              llvm.lldb
+              bazel_6
+              zlib
+              python3 # for scripts
+              clang-tools # provides clangd for editor support, your editor should pick this up
+              which # for debugging
+              pre-commit # pre commit hooks
+            ];
+          runScript = "$SHELL";
+          profile = ''
+          export EXTRA_PROMPT="(fhs)"
+          '';
+        };
       in {
+        packages.default = fhs;
         devShells = {
-          default = (pkgs.buildFHSUserEnv {
-            name = "carbon-dev";
-            targetPkgs = pkgs:
-              with pkgs; [
-                clangUseLLVM
-                llvm.lld
-                llvm.llvm
-                llvm.libcxx
-                llvm.libcxxabi
-                llvm.lldb
-                bazel_6
-                zlib
-                python3 # for scripts
-                clang-tools # provides clangd for editor support, your editor should pick this up
-                which # for debugging
-                pre-commit # pre commit hooks
-              ];
-          }).env;
+          default = fhs.env;
           # does not work yet
           # not-fhs = (pkgs.mkShell.override { stdenv = pkgs.stdenvAdapters.overrideCC pkgs.stdenv clangUseLLVM; }) {
           #   LD_LIBRARY_PATH = lib.makeLibraryPath [ llvm.libcxxabi ];
