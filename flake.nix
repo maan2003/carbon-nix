@@ -2,7 +2,6 @@
   description = "dev environment for carbon lang";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -11,41 +10,34 @@
       let
         pkgs = import nixpkgs { inherit system; };
         llvm = pkgs.llvmPackages_latest;
-        # taken from nixpkgs
-        clangUseLLVM = let
-          release_version = "14.0.6";
-          mkExtraBuildCommands0 = cc: ''
-            rsrc="$out/resource-root"
-            mkdir "$rsrc"
-            ln -s "${cc.lib}/lib/clang/${release_version}/include" "$rsrc"
-            echo "-resource-dir=$rsrc" >> $out/nix-support/cc-cflags
+        clang = pkgs.stdenv.mkDerivation {
+          name = "cc-wrapper-bazel";
+          buildInputs = [ llvm.clangUseLLVM pkgs.makeWrapper ];
+          phases = [ "fixupPhase" ];
+          postFixup = ''
+            mkdir -p $out/bin
+            makeWrapper ${llvm.clangUseLLVM}/bin/clang $out/bin/clang \
+              --add-flags "-I${pkgs.zlib.dev}/include \
+                           -I${llvm.compiler-rt.dev}/include \
+                           -L${llvm.libunwind}/lib \
+                           -L${llvm.libcxxabi}/lib \
+                           -L${pkgs.zlib}/lib \
+                           -L${llvm.libcxx}/lib"
+            makeWrapper ${llvm.clangUseLLVM}/bin/clang++ $out/bin/clang++ \
+              --add-flags "-I${pkgs.zlib.dev}/include \
+                           -I${llvm.compiler-rt.dev}/include \
+                           -L${llvm.libunwind}/lib \
+                           -L${llvm.libcxxabi}/lib \
+                           -L${pkgs.zlib}/lib \
+                           -L${llvm.libcxx}/lib"
           '';
-          mkExtraBuildCommands = cc:
-            mkExtraBuildCommands0 cc + ''
-              ln -s "${llvm.compiler-rt.out}/lib" "$rsrc/lib"
-              ln -s "${llvm.compiler-rt.out}/share" "$rsrc/share"
-            '';
-        in (pkgs.wrapCCWith rec {
-          cc = llvm.clang-unwrapped;
-          libcxx = llvm.libcxx;
-          bintools = llvm.bintools;
-          extraPackages = [ llvm.libcxxabi llvm.compiler-rt llvm.libunwind ];
-          extraBuildCommands = mkExtraBuildCommands cc;
-          nixSupport.cc-cflags = [
-            "-rtlib=compiler-rt"
-            "-Wno-unused-command-line-argument"
-            "-B${llvm.compiler-rt}/lib"
-            "-lunwind"
-            "--unwindlib=libunwind"
-            "-I${pkgs.zlib.dev}/include" # include zlib, it is not detected by bazel otherwise
-          ];
-          nixSupport.cc-ldflags = [ "-L${llvm.libunwind}/lib" ];
-        });
-        fhs = pkgs.buildFHSUserEnv {
-          name = "carbon-dev";
-          targetPkgs = pkgs:
-            with pkgs; [
-              clangUseLLVM
+        };
+      in {
+        devShells = {
+          default = (pkgs.mkShell.override { stdenv = pkgs.stdenvAdapters.overrideCC llvm.stdenv clang; }) {
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ llvm.libcxxabi pkgs.gcc-unwrapped pkgs.zlib ];
+            nativeBuildInputs = with pkgs; [
+              clang
               llvm.lld
               llvm.llvm
               llvm.libcxx
@@ -58,28 +50,7 @@
               which # for debugging
               pre-commit # pre commit hooks
             ];
-          runScript = "$SHELL";
-          profile = ''
-          export EXTRA_PROMPT="(fhs)"
-          '';
-        };
-      in {
-        packages.default = fhs;
-        devShells = {
-          default = fhs.env;
-          # does not work yet
-          # not-fhs = (pkgs.mkShell.override { stdenv = pkgs.stdenvAdapters.overrideCC pkgs.stdenv clangUseLLVM; }) {
-          #   LD_LIBRARY_PATH = lib.makeLibraryPath [ llvm.libcxxabi ];
-          #   nativeBuildInputs = with pkgs; [
-          #     llvm.libcxx
-          #     llvm.libcxxabi
-          #     zlib.dev
-          #   ];
-          #   buildInputs = with pkgs; [
-          #     bazel_6
-          #     zlib
-          #   ];
-          # };
+          };
         };
       });
 }
